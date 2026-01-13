@@ -41,11 +41,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="List available serial ports (placeholder)",
     )
     scan_parser.set_defaults(func=cmd_scan)
+    
+    scan_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Include built-in ttyS* ports",
+    )
+
 
     return parser
 
-
-def cmd_scan(_args: argparse.Namespace) -> int:
+def cmd_scan(args: argparse.Namespace) -> int:
     if list_ports is None:
         print("ERROR: pyserial is not installed (cannot scan ports).", file=sys.stderr)
         print("Hint: activate venv and run: pip install pyserial", file=sys.stderr)
@@ -56,14 +62,23 @@ def cmd_scan(_args: argparse.Namespace) -> int:
         print("No serial ports found.")
         return 0
 
+    shown = 0
     for p in ports:
         # Typical fields:
         # p.device: /dev/ttyUSB0, /dev/ttyACM0
         # p.description: adapter/board description
         # p.hwid: USB VID:PID and serial, etc.
+        dev = p.device or ""
+        if not args.all and dev.startswith("/dev/ttyS"):
+            continue
+
         desc = p.description or ""
         hwid = p.hwid or ""
-        print(f"{p.device}\t{desc}\t{hwid}")
+        print(f"{dev}\t{desc}\t{hwid}")
+        shown += 1
+
+    if shown == 0:
+        print("No serial ports found.")
 
     return 0
 
