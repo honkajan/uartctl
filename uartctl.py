@@ -10,6 +10,11 @@ Current stage:
 import argparse
 import sys
 
+try:
+    from serial.tools import list_ports  # pyserial
+except ImportError:
+    list_ports = None
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -41,8 +46,27 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def cmd_scan(_args: argparse.Namespace) -> int:
-    print("scan: not implemented yet")
+    if list_ports is None:
+        print("ERROR: pyserial is not installed (cannot scan ports).", file=sys.stderr)
+        print("Hint: activate venv and run: pip install pyserial", file=sys.stderr)
+        return 10
+
+    ports = list(list_ports.comports())
+    if not ports:
+        print("No serial ports found.")
+        return 0
+
+    for p in ports:
+        # Typical fields:
+        # p.device: /dev/ttyUSB0, /dev/ttyACM0
+        # p.description: adapter/board description
+        # p.hwid: USB VID:PID and serial, etc.
+        desc = p.description or ""
+        hwid = p.hwid or ""
+        print(f"{p.device}\t{desc}\t{hwid}")
+
     return 0
+
 
 
 def main(argv: list[str]) -> int:
