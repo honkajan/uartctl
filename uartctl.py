@@ -73,6 +73,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ping_parser.set_defaults(func=cmd_ping)
 
+    # id subcommand
+    id_parser = subparsers.add_parser(
+        "id",
+        help="Query device identification string",
+    )
+    id_parser.add_argument("--port", required=True, help="Serial port (e.g., /dev/ttyUSB0)")
+    id_parser.add_argument("--baud", type=int, default=115200, help="Baud rate (default: 115200)")
+    id_parser.add_argument("--timeout", type=float, default=1.0, help="Read timeout in seconds")
+    id_parser.add_argument(
+        "--settle-ms",
+        type=int,
+        default=200,
+        help="Delay after opening the port (ms)",
+    )
+    id_parser.set_defaults(func=cmd_id)
+
+
 
 
     return parser
@@ -161,6 +178,52 @@ def cmd_ping(args: argparse.Namespace) -> int:
         return EX_BAD_RESPONSE
 
     print("PONG")
+    return EX_OK
+
+def cmd_id(args: argparse.Namespace) -> int:
+    if serial is None:
+        print("ERROR: pyserial is not installed.", file=sys.stderr)
+        return EX_SERIAL
+
+    try:
+        ser = serial.Serial(
+            port=args.port,
+            baudrate=args.baud,
+            timeout=args.timeout,
+            write_timeout=args.timeout,
+        )
+    except Exception as e:
+        print(f"ERROR: failed to open serial port '{args.port}': {e}", file=sys.stderr)
+        return EX_SERIAL
+
+    with ser:
+        if args.settle_ms > 0:
+            time.sleep(args.settle_ms / 1000.0)
+
+        try:
+            ser.reset_input_buffer()
+        except Exception:
+            pass
+
+        try:
+            ser.write(b"ID?\n")
+            ser.flush()
+        except Exception as e:
+            print(f"ERROR: failed to write to '{args.port}': {e}", file=sys.stderr)
+            return EX_SERIAL
+
+        try:
+            raw = ser.readline()
+        except Exception as e:
+            print(f"ERROR: failed to read from '{args.port}': {e}", file=sys.stderr)
+            return EX_SERIAL
+
+    if not raw:
+        print("ERROR: timeout waiting for ID response.", file=sys.stderr)
+        return EX_TIMEOUT
+
+    resp = raw.decode("ascii", errors="replace").strip()
+    print(resp)
     return EX_OK
 
 
