@@ -89,6 +89,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     id_parser.set_defaults(func=cmd_id)
 
+    # ver subcommand
+    ver_parser = subparsers.add_parser(
+        "ver",
+        help="Query firmware version (MAJOR.MINOR.PATCH)",
+    )
+    ver_parser.add_argument("--port", required=True, help="Serial port (e.g., /dev/ttyUSB0)")
+    ver_parser.add_argument("--baud", type=int, default=115200, help="Baud rate (default: 115200)")
+    ver_parser.add_argument("--timeout", type=float, default=1.0, help="Read timeout in seconds")
+    ver_parser.add_argument(
+        "--settle-ms",
+        type=int,
+        default=200,
+        help="Delay after opening the port (ms)",
+    )
+    ver_parser.set_defaults(func=cmd_ver)
+
+
 
 
 
@@ -181,9 +198,44 @@ def cmd_ping(args: argparse.Namespace) -> int:
     return EX_OK
 
 def cmd_id(args: argparse.Namespace) -> int:
+    rc, resp = uart_request_line(args, b"ID?\n")
+    if rc != EX_OK:
+        if rc == EX_TIMEOUT:
+            print("ERROR: timeout waiting for ID response.", file=sys.stderr)
+        return rc
+    assert resp is not None
+    print(resp)
+    return EX_OK
+
+
+def cmd_ver(args: argparse.Namespace) -> int:
+    rc, resp = uart_request_line(args, b"VER?\n")
+    if rc != EX_OK:
+        if rc == EX_TIMEOUT:
+            print("ERROR: timeout waiting for version response.", file=sys.stderr)
+        return rc
+
+    assert resp is not None
+    parts = resp.split(".")
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+        print(f"ERROR: unexpected version format: '{resp}' (expected MAJOR.MINOR.PATCH)", file=sys.stderr)
+        return EX_BAD_RESPONSE
+
+    # Normalize (e.g., "00.02.000" -> "0.2.0")
+    major, minor, patch = (int(parts[0]), int(parts[1]), int(parts[2]))
+    print(f"{major}.{minor}.{patch}")
+    return EX_OK
+
+
+def uart_request_line(args: argparse.Namespace, request: bytes) -> tuple[int, str | None]:
+    """
+    Send a request line over UART and read one response line.
+
+    Returns: (exit_code, response_str_or_none)
+    """
     if serial is None:
         print("ERROR: pyserial is not installed.", file=sys.stderr)
-        return EX_SERIAL
+        return (EX_SERIAL, None)
 
     try:
         ser = serial.Serial(
@@ -194,10 +246,10 @@ def cmd_id(args: argparse.Namespace) -> int:
         )
     except Exception as e:
         print(f"ERROR: failed to open serial port '{args.port}': {e}", file=sys.stderr)
-        return EX_SERIAL
+        return (EX_SERIAL, None)
 
     with ser:
-        if args.settle_ms > 0:
+        if getattr(args, "settle_ms", 0) > 0:
             time.sleep(args.settle_ms / 1000.0)
 
         try:
@@ -206,25 +258,24 @@ def cmd_id(args: argparse.Namespace) -> int:
             pass
 
         try:
-            ser.write(b"ID?\n")
+            ser.write(request)
             ser.flush()
         except Exception as e:
             print(f"ERROR: failed to write to '{args.port}': {e}", file=sys.stderr)
-            return EX_SERIAL
+            return (EX_SERIAL, None)
 
         try:
             raw = ser.readline()
         except Exception as e:
             print(f"ERROR: failed to read from '{args.port}': {e}", file=sys.stderr)
-            return EX_SERIAL
+            return (EX_SERIAL, None)
 
     if not raw:
-        print("ERROR: timeout waiting for ID response.", file=sys.stderr)
-        return EX_TIMEOUT
+        return (EX_TIMEOUT, None)
 
     resp = raw.decode("ascii", errors="replace").strip()
-    print(resp)
-    return EX_OK
+    return (EX_OK, resp)
+
 
 
 def main(argv: list[str]) -> int:
