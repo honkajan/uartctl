@@ -119,6 +119,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=200,
         help="Delay after opening the port (ms)",
     )
+    uptime_parser.add_argument(
+        "--human",
+        action="store_true",
+        help="Print uptime in human-readable form (e.g. 1h 2m 3s)",
+    )
+
     uptime_parser.set_defaults(func=cmd_uptime)
 
 
@@ -207,6 +213,28 @@ def uart_request_line(args: argparse.Namespace, request: bytes) -> tuple[int, st
     resp = raw.decode("ascii", errors="replace").strip()
     return (EX_OK, resp)
 
+def format_uptime_human(ms: int) -> str:
+    seconds = ms // 1000
+    ms_rem = ms % 1000
+
+    minutes, sec = divmod(seconds, 60)
+    hours, min_ = divmod(minutes, 60)
+
+    parts: list[str] = []
+    if hours:
+        parts.append(f"{hours}h")
+    if min_:
+        parts.append(f"{min_}m")
+    if sec or not parts:
+        parts.append(f"{sec}s")
+
+    # Include milliseconds only if under 1 second
+    if hours == 0 and min_ == 0 and sec < 10 and ms_rem:
+        parts[-1] = f"{sec}.{ms_rem:03d}s"
+
+    return " ".join(parts)
+
+
 def cmd_ping(args: argparse.Namespace) -> int:
 
     rc, resp = uart_request_line(args, b"PING\n")
@@ -274,7 +302,10 @@ def cmd_uptime(args: argparse.Namespace) -> int:
         return EX_BAD_RESPONSE
 
     ms = int(resp)
-    print(ms)
+    if args.human:
+        print(format_uptime_human(ms))
+    else:
+        print(ms)
     return EX_OK
 
 
