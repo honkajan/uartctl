@@ -142,91 +142,6 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
     return 0
 
-def cmd_ping(args: argparse.Namespace) -> int:
-    if serial is None:
-        print("ERROR: pyserial is not installed (cannot use ping).", file=sys.stderr)
-        print("Hint: activate venv and run: pip install pyserial", file=sys.stderr)
-        return EX_SERIAL
-
-    try:
-        ser = serial.Serial(
-            port=args.port,
-            baudrate=args.baud,
-            timeout=args.timeout,
-            write_timeout=args.timeout,
-        )
-    except Exception as e:
-        print(f"ERROR: failed to open serial port '{args.port}': {e}", file=sys.stderr)
-        return EX_SERIAL
-
-    with ser:
-        # Optional settle time (some boards reset when DTR toggles on open)
-        if args.settle_ms > 0:
-            time.sleep(args.settle_ms / 1000.0)
-
-        # Clear any old data
-        try:
-            ser.reset_input_buffer()
-        except Exception:
-            pass
-
-        # Send PING
-        try:
-            ser.write(b"PING\n")
-            ser.flush()
-        except Exception as e:
-            print(f"ERROR: failed to write to '{args.port}': {e}", file=sys.stderr)
-            return EX_SERIAL
-
-        # Read one line response
-        try:
-            raw = ser.readline()  # reads until '\n' or timeout
-        except Exception as e:
-            print(f"ERROR: failed to read from '{args.port}': {e}", file=sys.stderr)
-            return EX_SERIAL
-
-    if not raw:
-        print("ERROR: timeout waiting for response.", file=sys.stderr)
-        return EX_TIMEOUT
-
-    resp = raw.decode("ascii", errors="replace").strip()
-    if resp != "PONG":
-        print(f"ERROR: unexpected response: '{resp}' (expected 'PONG')", file=sys.stderr)
-        return EX_BAD_RESPONSE
-
-    print("PONG")
-    return EX_OK
-
-def cmd_id(args: argparse.Namespace) -> int:
-    rc, resp = uart_request_line(args, b"ID?\n")
-    if rc != EX_OK:
-        if rc == EX_TIMEOUT:
-            print("ERROR: timeout waiting for ID response.", file=sys.stderr)
-        return rc
-    assert resp is not None
-    print(resp)
-    return EX_OK
-
-
-def cmd_ver(args: argparse.Namespace) -> int:
-    rc, resp = uart_request_line(args, b"VER?\n")
-    if rc != EX_OK:
-        if rc == EX_TIMEOUT:
-            print("ERROR: timeout waiting for version response.", file=sys.stderr)
-        return rc
-
-    assert resp is not None
-    parts = resp.split(".")
-    if len(parts) != 3 or not all(p.isdigit() for p in parts):
-        print(f"ERROR: unexpected version format: '{resp}' (expected MAJOR.MINOR.PATCH)", file=sys.stderr)
-        return EX_BAD_RESPONSE
-
-    # Normalize (e.g., "00.02.000" -> "0.2.0")
-    major, minor, patch = (int(parts[0]), int(parts[1]), int(parts[2]))
-    print(f"{major}.{minor}.{patch}")
-    return EX_OK
-
-
 def uart_request_line(args: argparse.Namespace, request: bytes) -> tuple[int, str | None]:
     """
     Send a request line over UART and read one response line.
@@ -235,6 +150,7 @@ def uart_request_line(args: argparse.Namespace, request: bytes) -> tuple[int, st
     """
     if serial is None:
         print("ERROR: pyserial is not installed.", file=sys.stderr)
+        print("Hint: activate venv and run: pip install pyserial", file=sys.stderr)
         return (EX_SERIAL, None)
 
     try:
@@ -276,6 +192,57 @@ def uart_request_line(args: argparse.Namespace, request: bytes) -> tuple[int, st
     resp = raw.decode("ascii", errors="replace").strip()
     return (EX_OK, resp)
 
+def cmd_ping(args: argparse.Namespace) -> int:
+
+    rc, resp = uart_request_line(args, b"PING\n")
+    if rc != EX_OK:
+        if rc == EX_TIMEOUT:
+            print("ERROR: timeout waiting for PONG.", file=sys.stderr)
+        return rc
+    
+    if resp is None:
+        return EX_TIMEOUT
+    
+    if resp != "PONG":
+        print(f"ERROR: unexpected response: '{resp}' (expected 'PONG')", file=sys.stderr)
+        return EX_BAD_RESPONSE
+
+    print("PONG")
+    return EX_OK
+
+def cmd_id(args: argparse.Namespace) -> int:
+    rc, resp = uart_request_line(args, b"ID?\n")
+    if rc != EX_OK:
+        if rc == EX_TIMEOUT:
+            print("ERROR: timeout waiting for ID response.", file=sys.stderr)
+        return rc
+    
+    if resp is None:
+        return EX_TIMEOUT
+    
+    print(resp)
+    return EX_OK
+
+
+def cmd_ver(args: argparse.Namespace) -> int:
+    rc, resp = uart_request_line(args, b"VER?\n")
+    if rc != EX_OK:
+        if rc == EX_TIMEOUT:
+            print("ERROR: timeout waiting for version response.", file=sys.stderr)
+        return rc
+
+    if resp is None:
+        return EX_TIMEOUT
+
+    parts = resp.split(".")
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+        print(f"ERROR: unexpected version format: '{resp}' (expected MAJOR.MINOR.PATCH)", file=sys.stderr)
+        return EX_BAD_RESPONSE
+
+    # Normalize (e.g., "00.02.000" -> "0.2.0")
+    major, minor, patch = (int(parts[0]), int(parts[1]), int(parts[2]))
+    print(f"{major}.{minor}.{patch}")
+    return EX_OK
 
 
 def main(argv: list[str]) -> int:
