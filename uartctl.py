@@ -105,6 +105,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ver_parser.set_defaults(func=cmd_ver)
 
+    # uptime subcommand
+    uptime_parser = subparsers.add_parser(
+        "uptime",
+        help="Query device uptime in milliseconds",
+    )
+    uptime_parser.add_argument("--port", required=True, help="Serial port (e.g., /dev/ttyUSB0)")
+    uptime_parser.add_argument("--baud", type=int, default=115200, help="Baud rate (default: 115200)")
+    uptime_parser.add_argument("--timeout", type=float, default=1.0, help="Read timeout in seconds")
+    uptime_parser.add_argument(
+        "--settle-ms",
+        type=int,
+        default=200,
+        help="Delay after opening the port (ms)",
+    )
+    uptime_parser.set_defaults(func=cmd_uptime)
 
 
 
@@ -242,6 +257,24 @@ def cmd_ver(args: argparse.Namespace) -> int:
     # Normalize (e.g., "00.02.000" -> "0.2.0")
     major, minor, patch = (int(parts[0]), int(parts[1]), int(parts[2]))
     print(f"{major}.{minor}.{patch}")
+    return EX_OK
+
+def cmd_uptime(args: argparse.Namespace) -> int:
+    rc, resp = uart_request_line(args, b"UPTIME?\n")
+    if rc != EX_OK:
+        if rc == EX_TIMEOUT:
+            print("ERROR: timeout waiting for uptime response.", file=sys.stderr)
+        return rc
+
+    if resp is None:
+        return EX_TIMEOUT
+
+    if not resp.isdigit():
+        print(f"ERROR: unexpected uptime format: '{resp}' (expected integer ms)", file=sys.stderr)
+        return EX_BAD_RESPONSE
+
+    ms = int(resp)
+    print(ms)
     return EX_OK
 
 
