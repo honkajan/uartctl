@@ -71,7 +71,11 @@ def build_parser() -> argparse.ArgumentParser:
         "ping",
         help="Send PING and expect PONG",
     )
-    ping_parser.add_argument("--port", help="Serial port (e.g., /dev/ttyUSB0)")
+    ping_parser.add_argument(
+        "--port",
+        default="auto",
+        help="Serial port (e.g., /dev/ttyUSB0) or 'auto' (default: auto)",
+    )
     ping_parser.add_argument("--baud", type=int, default=115200, help="Baud rate (default: 115200)")
     ping_parser.add_argument("--timeout", type=float, default=1.0, help="Read timeout in seconds (default: 1.0)")
     ping_parser.add_argument(
@@ -87,7 +91,11 @@ def build_parser() -> argparse.ArgumentParser:
         "id",
         help="Query device identification string",
     )
-    id_parser.add_argument("--port", help="Serial port (e.g., /dev/ttyUSB0)")
+    id_parser.add_argument(
+        "--port",
+        default="auto",
+        help="Serial port (e.g., /dev/ttyUSB0) or 'auto' (default: auto)",
+    )
     id_parser.add_argument("--baud", type=int, default=115200, help="Baud rate (default: 115200)")
     id_parser.add_argument("--timeout", type=float, default=1.0, help="Read timeout in seconds")
     id_parser.add_argument(
@@ -103,7 +111,11 @@ def build_parser() -> argparse.ArgumentParser:
         "ver",
         help="Query firmware version (MAJOR.MINOR.PATCH)",
     )
-    ver_parser.add_argument("--port", help="Serial port (e.g., /dev/ttyUSB0)")
+    ver_parser.add_argument(
+        "--port",
+        default="auto",
+        help="Serial port (e.g., /dev/ttyUSB0) or 'auto' (default: auto)",
+    )
     ver_parser.add_argument("--baud", type=int, default=115200, help="Baud rate (default: 115200)")
     ver_parser.add_argument("--timeout", type=float, default=1.0, help="Read timeout in seconds")
     ver_parser.add_argument(
@@ -119,7 +131,11 @@ def build_parser() -> argparse.ArgumentParser:
         "uptime",
         help="Query device uptime in milliseconds",
     )
-    uptime_parser.add_argument("--port", help="Serial port (e.g., /dev/ttyUSB0)")
+    uptime_parser.add_argument(
+        "--port",
+        default="auto",
+        help="Serial port (e.g., /dev/ttyUSB0) or 'auto' (default: auto)",
+    )
     uptime_parser.add_argument("--baud", type=int, default=115200, help="Baud rate (default: 115200)")
     uptime_parser.add_argument("--timeout", type=float, default=1.0, help="Read timeout in seconds")
     uptime_parser.add_argument(
@@ -194,26 +210,32 @@ def cmd_scan(args: argparse.Namespace) -> int:
 def resolve_port(args: argparse.Namespace) -> str | None:
     """
     Resolve serial port:
-    - If args.port is set, return it.
-    - Otherwise, auto-select if exactly one suitable port exists.
+    - If args.port is a real device path, use it.
+    - If args.port is 'auto' (or missing/empty), auto-select only if exactly one candidate exists.
     """
-    if args.port:
-        return args.port
+    port_arg = (getattr(args, "port", None) or "").strip()
+
+    # Treat missing port as auto (if you set default="auto", this is always set)
+    if port_arg and port_arg.lower() != "auto":
+        return port_arg
 
     if list_ports is None:
         return None
 
-    ports = []
+    candidates: list[str] = []
     for p in list_ports.comports():
         dev = p.device or ""
+        if not dev:
+            continue
         if not getattr(args, "all", False) and dev.startswith("/dev/ttyS"):
             continue
-        ports.append(dev)
+        candidates.append(dev)
 
-    if len(ports) == 1:
-        return ports[0]
+    if len(candidates) == 1:
+        return candidates[0]
 
     return None
+
 
 def uart_request_line(args: argparse.Namespace, request: bytes) -> tuple[int, str | None]:
     """
@@ -226,14 +248,12 @@ def uart_request_line(args: argparse.Namespace, request: bytes) -> tuple[int, st
 
     port = resolve_port(args)
     if not port:
-        return (
-            emit_err(
-                args,
-                EX_SERIAL,
-                "no serial port specified and unable to auto-select one",
-            ),
-            None,
-        )
+        # Provide a helpful message
+        requested = (getattr(args, "port", "") or "").strip().lower()
+        if requested == "auto" or requested == "":
+            return (emit_err(args, EX_SERIAL, "unable to auto-select port; specify --port"), None)
+        return (emit_err(args, EX_SERIAL, f"invalid port '{args.port}'"), None)
+
 
     try:
         ser = serial.Serial(
