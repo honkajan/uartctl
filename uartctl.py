@@ -10,6 +10,8 @@ Current stage:
 import argparse
 import sys
 import time
+import json
+
 
 
 try:
@@ -36,6 +38,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--verbose",
         action="store_true",
         help="Enable verbose output",
+    )
+
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output machine-readable JSON (JavaScript Object Notation)",
     )
 
     subparsers = parser.add_subparsers(
@@ -134,21 +142,40 @@ def build_parser() -> argparse.ArgumentParser:
 
 def cmd_scan(args: argparse.Namespace) -> int:
     if list_ports is None:
-        print("ERROR: pyserial is not installed (cannot scan ports).", file=sys.stderr)
-        print("Hint: activate venv and run: pip install pyserial", file=sys.stderr)
-        return EX_SERIAL
+        return emit_err(args, EX_SERIAL, "pyserial not installed (cannot scan ports)")
 
     ports = list(list_ports.comports())
+
+    if args.json:
+        items = []
+        for p in ports:
+            dev = p.device or ""
+            if not args.all and dev.startswith("/dev/ttyS"):
+                continue
+
+            items.append(
+                {
+                    "device": dev,
+                    "description": p.description or "",
+                    "hwid": p.hwid or "",
+                }
+            )
+
+        payload = {"ports": items}
+
+        if not items:
+            payload["note"] = "no serial ports found"
+
+        emit_ok(args, payload)
+        return EX_OK
+
+    # Human output
     if not ports:
         print("No serial ports found.")
-        return 0
+        return EX_OK
 
     shown = 0
     for p in ports:
-        # Typical fields:
-        # p.device: /dev/ttyUSB0, /dev/ttyACM0
-        # p.description: adapter/board description
-        # p.hwid: USB VID:PID and serial, etc.
         dev = p.device or ""
         if not args.all and dev.startswith("/dev/ttyS"):
             continue
@@ -161,7 +188,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
     if shown == 0:
         print("No serial ports found.")
 
-    return 0
+    return EX_OK
 
 def uart_request_line(args: argparse.Namespace, request: bytes) -> tuple[int, str | None]:
     """
@@ -170,9 +197,7 @@ def uart_request_line(args: argparse.Namespace, request: bytes) -> tuple[int, st
     Returns: (exit_code, response_str_or_none)
     """
     if serial is None:
-        print("ERROR: pyserial is not installed.", file=sys.stderr)
-        print("Hint: activate venv and run: pip install pyserial", file=sys.stderr)
-        return (EX_SERIAL, None)
+        return (emit_err(args, EX_SERIAL, "pyserial not installed"), None)
 
     try:
         ser = serial.Serial(
@@ -182,8 +207,7 @@ def uart_request_line(args: argparse.Namespace, request: bytes) -> tuple[int, st
             write_timeout=args.timeout,
         )
     except Exception as e:
-        print(f"ERROR: failed to open serial port '{args.port}': {e}", file=sys.stderr)
-        return (EX_SERIAL, None)
+        return (emit_err(args, EX_SERIAL, f"failed to open serial port '{args.port}': {e}"), None)
 
     with ser:
         if getattr(args, "settle_ms", 0) > 0:
@@ -198,14 +222,12 @@ def uart_request_line(args: argparse.Namespace, request: bytes) -> tuple[int, st
             ser.write(request)
             ser.flush()
         except Exception as e:
-            print(f"ERROR: failed to write to '{args.port}': {e}", file=sys.stderr)
-            return (EX_SERIAL, None)
-
+            return (emit_err(args, EX_SERIAL, f"failed to write to '{args.port}': {e}"), None)
+        
         try:
             raw = ser.readline()
         except Exception as e:
-            print(f"ERROR: failed to read from '{args.port}': {e}", file=sys.stderr)
-            return (EX_SERIAL, None)
+            return (emit_err(args, EX_SERIAL, f"failed to read from '{args.port}': {e}"), None)
 
     if not raw:
         return (EX_TIMEOUT, None)
@@ -234,36 +256,61 @@ def format_uptime_human(ms: int) -> str:
 
     return " ".join(parts)
 
+def emit_ok(args: argparse.Namespace, payload: dict) -> None:
+    if args.json:
+        out = {"ok": True, "command": args.command}
+        out.update(payload)
+        print(json.dumps(out))
+    else:
+        # Non-JSON callers should print their normal output themselves.
+        # So emit_ok does nothing in that mode.
+        pass
+
+
+def emit_err(args: argparse.Namespace, code: int, message: str) -> int:
+    if args.json:
+        out = {"ok": False, "command": args.command, "error": message, "code": int(code)}
+        print(json.dumps(out))
+    else:
+        print(f"ERROR: {message}", file=sys.stderr)
+    return int(code)
+
 
 def cmd_ping(args: argparse.Namespace) -> int:
 
     rc, resp = uart_request_line(args, b"PING\n")
     if rc != EX_OK:
         if rc == EX_TIMEOUT:
-            print("ERROR: timeout waiting for PONG.", file=sys.stderr)
+            return emit_err(args, EX_TIMEOUT, "timeout waiting for PONG")
         return rc
     
     if resp is None:
-        return EX_TIMEOUT
+        return emit_err(args, EX_TIMEOUT, "timeout waiting for PONG")
     
     if resp != "PONG":
         print(f"ERROR: unexpected response: '{resp}' (expected 'PONG')", file=sys.stderr)
         return EX_BAD_RESPONSE
 
-    print("PONG")
+    if args.json:
+        emit_ok(args, {"response": "PONG"})
+    else:
+        print("PONG")
     return EX_OK
 
 def cmd_id(args: argparse.Namespace) -> int:
     rc, resp = uart_request_line(args, b"ID?\n")
     if rc != EX_OK:
         if rc == EX_TIMEOUT:
-            print("ERROR: timeout waiting for ID response.", file=sys.stderr)
+            return emit_err(args, EX_TIMEOUT, "timeout waiting for ID response")
         return rc
     
     if resp is None:
-        return EX_TIMEOUT
+        return emit_err(args, EX_TIMEOUT, "timeout waiting for ID response")
     
-    print(resp)
+    if args.json:
+        emit_ok(args, {"id": resp})
+    else:
+        print(resp)
     return EX_OK
 
 
@@ -271,41 +318,49 @@ def cmd_ver(args: argparse.Namespace) -> int:
     rc, resp = uart_request_line(args, b"VER?\n")
     if rc != EX_OK:
         if rc == EX_TIMEOUT:
-            print("ERROR: timeout waiting for version response.", file=sys.stderr)
+            return emit_err(args, EX_TIMEOUT, "timeout waiting for version response")
         return rc
 
     if resp is None:
-        return EX_TIMEOUT
+        return emit_err(args, EX_TIMEOUT, "timeout waiting for version response")
 
     parts = resp.split(".")
     if len(parts) != 3 or not all(p.isdigit() for p in parts):
-        print(f"ERROR: unexpected version format: '{resp}' (expected MAJOR.MINOR.PATCH)", file=sys.stderr)
-        return EX_BAD_RESPONSE
+        return emit_err(args, EX_BAD_RESPONSE, f"unexpected version format '{resp}' (expected MAJOR.MINOR.PATCH)")
 
     # Normalize (e.g., "00.02.000" -> "0.2.0")
     major, minor, patch = (int(parts[0]), int(parts[1]), int(parts[2]))
-    print(f"{major}.{minor}.{patch}")
+    ver_norm = f"{major}.{minor}.{patch}"
+
+    if args.json:
+        emit_ok(args, {"version": ver_norm, "major": major, "minor": minor, "patch": patch})
+    else:
+        print(ver_norm)
     return EX_OK
 
 def cmd_uptime(args: argparse.Namespace) -> int:
     rc, resp = uart_request_line(args, b"UPTIME?\n")
     if rc != EX_OK:
         if rc == EX_TIMEOUT:
-            print("ERROR: timeout waiting for uptime response.", file=sys.stderr)
+            return emit_err(args, EX_TIMEOUT, "timeout waiting for uptime response")
         return rc
 
     if resp is None:
-        return EX_TIMEOUT
+        return emit_err(args, EX_TIMEOUT, "timeout waiting for uptime response")
 
     if not resp.isdigit():
-        print(f"ERROR: unexpected uptime format: '{resp}' (expected integer ms)", file=sys.stderr)
-        return EX_BAD_RESPONSE
+        return emit_err(args, EX_BAD_RESPONSE, f"unexpected uptime format '{resp}' (expected integer ms)")
 
     ms = int(resp)
-    if args.human:
-        print(format_uptime_human(ms))
+    human = format_uptime_human(ms)
+
+    if args.json:
+        payload = {"uptime_ms": ms}
+        if args.human:
+            payload["uptime_human"] = human
+        emit_ok(args, payload)
     else:
-        print(ms)
+        print(human if args.human else ms)
     return EX_OK
 
 
