@@ -44,6 +44,37 @@ EX_SERIAL = 10
 EX_TIMEOUT = 11
 EX_BAD_RESPONSE = 12
 
+def add_serial_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--port",
+        default="auto",
+        help="Serial port (e.g., /dev/ttyUSB0) or 'auto' (default: auto)",
+    )
+    p.add_argument(
+        "--autoall",
+        action="store_true",
+        help="Port auto-select: Include built-in ttyS* ports",
+    )
+    p.add_argument(
+        "--baud",
+        type=int,
+        default=115200,
+        help="Baud rate (default: 115200)",
+    )
+    p.add_argument(
+        "--timeout",
+        type=float,
+        default=1.0,
+        help="Read timeout in seconds (default: 1.0)",
+    )
+    p.add_argument(
+        "--settle-ms",
+        type=int,
+        default=200,
+        help="Delay after opening the port (ms). Useful if device resets on open.",
+    )
+
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -71,12 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # scan subcommand
-    scan_parser = subparsers.add_parser(
-        "scan",
-        help="List available serial ports",
-    )
+    scan_parser = subparsers.add_parser("scan", help="List available serial ports")
     scan_parser.set_defaults(func=cmd_scan)
-    
     scan_parser.add_argument(
         "--all",
         action="store_true",
@@ -84,112 +111,42 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # ping subcommand
-    ping_parser = subparsers.add_parser(
-        "ping",
-        help="Send PING and expect PONG",
-    )
-    ping_parser.add_argument(
-        "--port",
-        default="auto",
-        help="Serial port (e.g., /dev/ttyUSB0) or 'auto' (default: auto)",
-    )
-    ping_parser.add_argument(
-        "--autoall",
-        action="store_true",
-        help="Port auto-select: Include built-in ttyS* ports",
-    )
-    ping_parser.add_argument("--baud", type=int, default=115200, help="Baud rate (default: 115200)")
-    ping_parser.add_argument("--timeout", type=float, default=1.0, help="Read timeout in seconds (default: 1.0)")
-    ping_parser.add_argument(
-        "--settle-ms",
-        type=int,
-        default=200,
-        help="Delay after opening the port (ms). Useful if device resets on open.",
-    )
+    ping_parser = subparsers.add_parser("ping", help="Send PING and expect PONG")
+    add_serial_args(ping_parser)
     ping_parser.set_defaults(func=cmd_ping)
 
+
     # id subcommand
-    id_parser = subparsers.add_parser(
-        "id",
-        help="Query device identification string",
-    )
-    id_parser.add_argument(
-        "--port",
-        default="auto",
-        help="Serial port (e.g., /dev/ttyUSB0) or 'auto' (default: auto)",
-    )
-    id_parser.add_argument(
-        "--autoall",
-        action="store_true",
-        help="Port auto-select: Include built-in ttyS* ports",
-    )
-    id_parser.add_argument("--baud", type=int, default=115200, help="Baud rate (default: 115200)")
-    id_parser.add_argument("--timeout", type=float, default=1.0, help="Read timeout in seconds")
-    id_parser.add_argument(
-        "--settle-ms",
-        type=int,
-        default=200,
-        help="Delay after opening the port (ms)",
-    )
+    id_parser = subparsers.add_parser("id", help="Query device identification string")
+    add_serial_args(id_parser)
     id_parser.set_defaults(func=cmd_id)
 
+
     # ver subcommand
-    ver_parser = subparsers.add_parser(
-        "ver",
-        help="Query firmware version (MAJOR.MINOR.PATCH)",
-    )
-    ver_parser.add_argument(
-        "--port",
-        default="auto",
-        help="Serial port (e.g., /dev/ttyUSB0) or 'auto' (default: auto)",
-    )
-    ver_parser.add_argument(
-        "--autoall",
-        action="store_true",
-        help="Port auto-select: Include built-in ttyS* ports",
-    )
-    ver_parser.add_argument("--baud", type=int, default=115200, help="Baud rate (default: 115200)")
-    ver_parser.add_argument("--timeout", type=float, default=1.0, help="Read timeout in seconds")
-    ver_parser.add_argument(
-        "--settle-ms",
-        type=int,
-        default=200,
-        help="Delay after opening the port (ms)",
-    )
+    ver_parser = subparsers.add_parser("ver", help="Query firmware version (MAJOR.MINOR.PATCH)")
+    add_serial_args(ver_parser)
     ver_parser.set_defaults(func=cmd_ver)
 
+
     # uptime subcommand
-    uptime_parser = subparsers.add_parser(
-        "uptime",
-        help="Query device uptime in milliseconds",
-    )
-    uptime_parser.add_argument(
-        "--port",
-        default="auto",
-        help="Serial port (e.g., /dev/ttyUSB0) or 'auto' (default: auto)",
-    )
-    uptime_parser.add_argument(
-        "--autoall",
-        action="store_true",
-        help="Port auto-select: Include built-in ttyS* ports",
-    )
-    uptime_parser.add_argument("--baud", type=int, default=115200, help="Baud rate (default: 115200)")
-    uptime_parser.add_argument("--timeout", type=float, default=1.0, help="Read timeout in seconds")
-    uptime_parser.add_argument(
-        "--settle-ms",
-        type=int,
-        default=200,
-        help="Delay after opening the port (ms)",
-    )
+    uptime_parser = subparsers.add_parser("uptime", help="Query device uptime in milliseconds")
+    add_serial_args(uptime_parser)
     uptime_parser.add_argument(
         "--human",
         action="store_true",
         help="Print uptime in human-readable form (e.g. 1h 2m 3s)",
     )
-
     uptime_parser.set_defaults(func=cmd_uptime)
 
+    # rping parser  (remote ping)
+    rping_parser = subparsers.add_parser("rping", help="RF ping the remote node via the gateway")
+    add_serial_args(rping_parser)
+    rping_parser.set_defaults(func=cmd_rping)
 
+    #temp parser (remote temperature)
+    temp_parser = subparsers.add_parser("temp", help="Fetch remote temperatures via the gateway")
+    add_serial_args(temp_parser)
+    temp_parser.set_defaults(func=cmd_temp)
 
 
     return parser
@@ -325,6 +282,39 @@ def cmd_uptime(args: argparse.Namespace) -> int:
     else:
         print(human if args.human else ms)
     return EX_OK
+
+def cmd_rping(args) -> int:
+    """
+    RF ping the remote node via the gateway.
+    UART command: RPING?
+    Expected response:
+      - 'RPONG'
+      - or 'RPING FAIL ...'
+    """
+    line = uart_request_line(args, b"RPING?\n")
+    if line is None:
+        return emit_err(args, EX_TIMEOUT, "no response to RPING?")
+
+    # For now, just print exactly what firmware returned
+    print(line)
+    return EX_OK
+
+
+def cmd_temp(args) -> int:
+    """
+    Fetch remote temperatures via the gateway.
+    UART command: TEMP?
+    Expected response:
+      - 'TEMP ...'
+      - or 'TEMP FAIL ...'
+    """
+    line = uart_request_line(args, b"TEMP?\n")
+    if line is None:
+        return emit_err(args, EX_TIMEOUT, "no response to TEMP?")
+
+    print(line)
+    return EX_OK
+
 
 
 def uart_request_line(args: argparse.Namespace, request: bytes) -> tuple[int, str | None]:
