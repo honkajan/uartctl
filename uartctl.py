@@ -28,7 +28,11 @@ import argparse
 import sys
 import time
 import json
+import re
+import csv
 import logging
+from datetime import datetime
+import os
 
 
 
@@ -43,6 +47,9 @@ EX_OK = 0
 EX_SERIAL = 10
 EX_TIMEOUT = 11
 EX_BAD_RESPONSE = 12
+
+_TEMP_KV_RE = re.compile(r"(\w+)=([0-9A-Fa-fx]+)")
+
 
 def add_serial_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
@@ -147,6 +154,14 @@ def build_parser() -> argparse.ArgumentParser:
     temp_parser = subparsers.add_parser("temp", help="Fetch remote temperatures via the gateway")
     add_serial_args(temp_parser)
     temp_parser.set_defaults(func=cmd_temp)
+
+    # logtemp parser (CSV logger for TEMP?)
+    logtemp_parser = subparsers.add_parser("logtemp", help="Log remote temperatures to CSV (Excel-friendly)")
+    add_serial_args(logtemp_parser)
+    logtemp_parser.add_argument("--out", default="temps.csv", help="Output CSV file (default: temps.csv)")
+    logtemp_parser.add_argument("--interval", type=float, default=1.0, help="Sampling interval seconds (default: 1.0)")
+    logtemp_parser.add_argument("--count", type=int, default=None, help="Number of samples (default: unlimited until Ctrl+C)")
+    logtemp_parser.set_defaults(func=cmd_logtemp)
 
 
     return parser
@@ -283,7 +298,7 @@ def cmd_uptime(args: argparse.Namespace) -> int:
         print(human if args.human else ms)
     return EX_OK
 
-def cmd_rping(args) -> int:
+def cmd_rping(args: argparse.Namespace) -> int:
     """
     RF ping the remote node via the gateway.
     UART command: RPING?
@@ -291,16 +306,65 @@ def cmd_rping(args) -> int:
       - 'RPONG'
       - or 'RPING FAIL ...'
     """
-    line = uart_request_line(args, b"RPING?\n")
-    if line is None:
-        return emit_err(args, EX_TIMEOUT, "no response to RPING?")
+    rc, resp = uart_request_line(args, b"RPING?\n")
+    if rc != EX_OK:
+        if rc == EX_TIMEOUT:
+            return emit_err(args, EX_TIMEOUT, "timeout waiting for RPONG")
+        return rc
 
-    # For now, just print exactly what firmware returned
-    print(line)
+    if resp is None:
+        return emit_err(args, EX_TIMEOUT, "timeout waiting for RPONG")
+
+    if resp != "RPONG":
+        # Pass through diagnostics from firmware
+        return emit_err(args, EX_BAD_RESPONSE, f"unexpected response '{resp}' (expected 'RPONG')")
+
+    if args.json:
+        emit_ok(args, {"response": resp})
+    else:
+        print(resp)
+
     return EX_OK
 
 
-def cmd_temp(args) -> int:
+def parse_temp_line(line: str) -> dict:
+    """
+    Parse: 'TEMP ADC0=... ADC1=... T0=... T1=... age=... flags=0x....'
+    Returns a dict with numeric values (ints), flags is int.
+    """
+    if not line.startswith("TEMP "):
+        raise ValueError(f"not a TEMP line: {line!r}")
+
+    kv = dict(_TEMP_KV_RE.findall(line))
+    if not kv:
+        raise ValueError(f"no key=value fields in TEMP line: {line!r}")
+
+    out: dict = {}
+    for k, v in kv.items():
+        out[k] = int(v, 0)  # base-0 handles hex with 0x prefix
+
+    # Convenience conversions (keep originals too)
+    if "T0" in out:
+        out["T0_C"] = out["T0"] / 1000.0
+    if "T1" in out:
+        out["T1_C"] = out["T1"] / 1000.0
+
+    return out
+
+def resolve_out_path(out: str | None) -> str:
+    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+    if out is None:
+        return f"temps_{ts}.csv"
+
+    # If user gave a filename, insert timestamp before extension
+    base, ext = os.path.splitext(out)
+    if ext.lower() != ".csv":
+        ext = ".csv"
+
+    return f"{base}_{ts}{ext}"
+
+def cmd_temp(args: argparse.Namespace) -> int:
     """
     Fetch remote temperatures via the gateway.
     UART command: TEMP?
@@ -308,11 +372,133 @@ def cmd_temp(args) -> int:
       - 'TEMP ...'
       - or 'TEMP FAIL ...'
     """
-    line = uart_request_line(args, b"TEMP?\n")
-    if line is None:
-        return emit_err(args, EX_TIMEOUT, "no response to TEMP?")
+    rc, resp = uart_request_line(args, b"TEMP?\n")
+    if rc != EX_OK:
+        if rc == EX_TIMEOUT:
+            return emit_err(args, EX_TIMEOUT, "timeout waiting for TEMP response")
+        return rc
 
-    print(line)
+    if resp is None:
+        return emit_err(args, EX_TIMEOUT, "timeout waiting for TEMP response")
+
+    if not resp.startswith("TEMP "):
+        return emit_err(args, EX_BAD_RESPONSE, f"unexpected response '{resp}' (expected 'TEMP ...')")
+
+    try:
+        d = parse_temp_line(resp)
+    except Exception as e:
+        return emit_err(args, EX_BAD_RESPONSE, f"failed to parse TEMP response: {e}")
+
+    if args.json:
+        emit_ok(args, {
+            "raw": resp,
+            "adc0": d.get("ADC0"),
+            "adc1": d.get("ADC1"),
+            "t0_mC": d.get("T0"),
+            "t1_mC": d.get("T1"),
+            "t0_C": d.get("T0_C"),
+            "t1_C": d.get("T1_C"),
+            "age_ms": d.get("age"),
+            "flags": d.get("flags"),
+        })
+        return EX_OK
+
+    # Human output (clean)
+    t0 = d.get("T0_C")
+    t1 = d.get("T1_C")
+    age = d.get("age")
+    print(f"T0={t0:.2f} °C  T1={t1:.2f} °C  age={age} ms")
+    return EX_OK
+
+
+
+def cmd_logtemp(args: argparse.Namespace) -> int:
+    """
+    Periodically fetch TEMP samples and write CSV for Excel/plotting.
+
+    Output columns:
+      iso_time, epoch_s, t0_C, t1_C, t0_mC, t1_mC, age_ms, flags, adc0, adc1
+
+    Stop with Ctrl+C.
+    """
+    out_path = resolve_out_path(args.out)
+
+    start_ts = time.time()
+    start_iso = datetime.fromtimestamp(start_ts).isoformat(timespec="seconds")
+
+    print("Logging temperatures")
+    print(f"  start time: {start_iso}")
+    print(f"  port: {args.port}")
+    print(f"  interval: {args.interval} s")
+    print(f"  output: {out_path}")
+    print("Press Ctrl+C to stop")
+    print()
+
+    interval = float(args.interval)
+    count = args.count
+
+    # Open output file (line-buffered text)
+    try:
+        f = open(out_path, "w", encoding="utf-8", newline="")
+    except Exception as e:
+        return emit_err(args, EX_IO, f"failed to open output file '{out_path}': {e}")
+
+    with f:
+        w = csv.writer(f)
+        w.writerow([f"# start_time={start_iso} interval={interval}s port={args.port}"])
+        w.writerow(["iso_time", "epoch_s", "t0_C", "t1_C", "t0_mC", "t1_mC", "age_ms", "flags", "adc0", "adc1"])
+
+
+        n = 0
+        try:
+            while True:
+                if count is not None and n >= count:
+                    break
+
+                rc, resp = uart_request_line(args, b"TEMP?\n")
+                ts = time.time()
+                iso = datetime.fromtimestamp(ts).isoformat(timespec="seconds")
+
+                if rc == EX_OK and resp and resp.startswith("TEMP "):
+                    try:
+                        d = parse_temp_line(resp)
+                    except Exception:
+                        d = {}
+
+                    t0_mC = d.get("T0")
+                    t1_mC = d.get("T1")
+                    adc0 = d.get("ADC0")
+                    adc1 = d.get("ADC1")
+                    age_ms = d.get("age")
+                    flags = d.get("flags")
+
+                    t0_C = (t0_mC / 1000.0) if isinstance(t0_mC, int) else None
+                    t1_C = (t1_mC / 1000.0) if isinstance(t1_mC, int) else None
+
+                    w.writerow([iso, f"{ts:.3f}", t0_C, t1_C, t0_mC, t1_mC, age_ms,
+                                f"0x{flags:04X}" if isinstance(flags, int) else None,
+                                adc0, adc1])
+
+                    if not args.json and args.verbose:
+                        print(f"LOG {iso} T0={t0_C:.2f}C T1={t1_C:.2f}C", file=sys.stderr)
+
+                else:
+                    # Log a failed sample row (keep time continuity)
+                    w.writerow([iso, f"{ts:.3f}", None, None, None, None, None, None, None, None])
+                    if not args.json:
+                        print(f"ERROR: TEMP sample failed rc={rc} resp={resp!r}", file=sys.stderr)
+
+                f.flush()
+                n += 1
+                time.sleep(interval)
+
+        except KeyboardInterrupt:
+            pass
+
+    if args.json:
+        emit_ok(args, {"out": out_path, "samples": n})
+    else:
+        print(f"Wrote {n} samples to {out_path}")
     return EX_OK
 
 
