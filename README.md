@@ -195,4 +195,5 @@ of the tool.
 
 ## License
 
-This project is currently intended for personal and educational use.
+This project is licensed under the MIT License.  
+See the LICENSE file for details.
