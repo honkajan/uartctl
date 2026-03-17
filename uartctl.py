@@ -403,11 +403,19 @@ def cmd_temp(args: argparse.Namespace) -> int:
         })
         return EX_OK
 
-    # Human output (clean)
+    # Human output (robust)
     t0 = d.get("T0_C")
     t1 = d.get("T1_C")
     age = d.get("age")
-    print(f"T0={t0:.2f} °C  T1={t1:.2f} °C  age={age} ms")
+    flags = d.get("flags")
+
+    def fmt_temp(x):
+        return f"{x:.2f}" if isinstance(x, (int, float)) else "N/A"
+
+    age_str = str(age) if isinstance(age, int) else "N/A"
+    flags_str = f"0x{flags:04X}" if isinstance(flags, int) else "N/A"
+
+    print(f"T0={fmt_temp(t0)} °C  T1={fmt_temp(t1)} °C  age={age_str} ms flags={flags_str}")
     return EX_OK
 
 
