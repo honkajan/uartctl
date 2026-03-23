@@ -10,6 +10,21 @@ script-friendly output.
 
 ---
 
+## Repository context
+
+This repository contains the host-side CLI tool used to interact with the embedded STM32 + nRF24 temperature logger system over UART.
+
+The broader system documentation is maintained separately in:
+
+- **stm32-nrf24-temperature-logger**: [System-level documentation](https://github.com/honkajan/stm32-nrf24-temperature-logger)
+
+Related repositories:
+
+- **gateway-fw** (STM32 gateway firmware):  [https://github.com/honkajan/gateway-fw](https://github.com/honkajan/gateway-fw)
+- **remote-fw** (STM32 remote node firmware): [https://github.com/honkajan/remote-fw](https://github.com/honkajan/remote-fw)
+  
+---
+
 ## Features
 
 - Line-based ASCII protocol over UART
