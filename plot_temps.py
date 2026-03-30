@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import csv
 import datetime as dt
+import math
 import matplotlib.pyplot as plt
 import os
 from datetime import datetime
@@ -11,23 +12,56 @@ def load_csv(path: str):
     t0 = []
     t1 = []
 
+    TEMP_FLAG_T0_VALID = 1 << 0
+    TEMP_FLAG_T1_VALID = 1 << 1
+
     with open(path, newline="", encoding="utf-8") as f:
-        # Skip metadata/comment lines starting with '#'
         rows = (line for line in f if not line.startswith("#"))
         r = csv.DictReader(rows)
 
         for row in r:
-            # Skip missing samples (if any)
-            if not row["t0_C"] or not row["t1_C"]:
+            flags_s = (row.get("flags") or "").strip().lower()
+            adc0 = (row.get("adc0") or "").strip()
+            adc1 = (row.get("adc1") or "").strip()
+
+            # Skip clearly invalid reboot/startup rows
+            if flags_s == "0x0000":
                 continue
 
-            # iso_time like "2026-02-04T11:39:42"
+            try:
+                flags = int(flags_s, 0) if flags_s else 0
+            except ValueError:
+                flags = 0
+
+            # Parse raw CSV values first
+            t0_c = float(row["t0_C"]) if row.get("t0_C") else float("nan")
+            t1_c = float(row["t1_C"]) if row.get("t1_C") else float("nan")
+
+            # Extra guard for known bogus zero startup row
+            if (
+                t0_c == 0.0 and
+                t1_c == 0.0 and
+                adc0 == "0" and
+                adc1 == "0"
+            ):
+                continue
+
+            # Respect per-channel validity bits from firmware
+            if (flags & TEMP_FLAG_T0_VALID) == 0:
+                t0_c = float("nan")
+
+            if (flags & TEMP_FLAG_T1_VALID) == 0:
+                t1_c = float("nan")
+
+            # Skip row only if both channels are invalid/missing
+            if math.isnan(t0_c) and math.isnan(t1_c):
+                continue
+
             t.append(dt.datetime.fromisoformat(row["iso_time"]))
-            t0.append(float(row["t0_C"]))
-            t1.append(float(row["t1_C"]))
+            t0.append(t0_c)
+            t1.append(t1_c)
 
     return t, t0, t1
-
 
 def main(path: str):
     t, t0, t1 = load_csv(path)

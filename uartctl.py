@@ -48,7 +48,7 @@ EX_SERIAL = 10
 EX_TIMEOUT = 11
 EX_BAD_RESPONSE = 12
 
-_TEMP_KV_RE = re.compile(r"(\w+)=([0-9A-Fa-fx]+)")
+_TEMP_KV_RE = re.compile(r"(\w+)=(0x[0-9A-Fa-f]+|-?\d+)")
 
 
 def add_serial_args(p: argparse.ArgumentParser) -> None:
@@ -445,6 +445,9 @@ def cmd_logtemp(args: argparse.Namespace) -> int:
     interval = float(args.interval)
     count = args.count
 
+    def fmt_temp(x):
+        return f"{x:.2f}" if isinstance(x, (int, float)) else "N/A"
+
     # Open output file (line-buffered text)
     try:
         f = open(out_path, "w", encoding="utf-8", newline="")
@@ -456,7 +459,6 @@ def cmd_logtemp(args: argparse.Namespace) -> int:
         w.writerow([f"# start_time={start_iso} interval={interval}s port={args.port}"])
         w.writerow(["iso_time", "epoch_s", "t0_C", "t1_C", "t0_mC", "t1_mC", "age_ms", "flags", "adc0", "adc1"])
 
-
         n = 0
         try:
             while True:
@@ -467,11 +469,13 @@ def cmd_logtemp(args: argparse.Namespace) -> int:
                 ts = time.time()
                 iso = datetime.fromtimestamp(ts).isoformat(timespec="seconds")
 
-                if rc == EX_OK and resp and resp.startswith("TEMP "):
+                if rc == EX_OK and resp and resp.startswith("TEMP ") and not resp.startswith("TEMP FAIL"):
                     try:
                         d = parse_temp_line(resp)
-                    except Exception:
+                    except Exception as e:
                         d = {}
+                        if not args.json and args.verbose:
+                            print(f"ERROR: failed to parse TEMP response: {e}; resp={resp!r}", file=sys.stderr)
 
                     t0_mC = d.get("T0")
                     t1_mC = d.get("T1")
@@ -483,12 +487,14 @@ def cmd_logtemp(args: argparse.Namespace) -> int:
                     t0_C = (t0_mC / 1000.0) if isinstance(t0_mC, int) else None
                     t1_C = (t1_mC / 1000.0) if isinstance(t1_mC, int) else None
 
-                    w.writerow([iso, f"{ts:.3f}", t0_C, t1_C, t0_mC, t1_mC, age_ms,
-                                f"0x{flags:04X}" if isinstance(flags, int) else None,
-                                adc0, adc1])
+                    w.writerow([
+                        iso, f"{ts:.3f}", t0_C, t1_C, t0_mC, t1_mC, age_ms,
+                        f"0x{flags:04X}" if isinstance(flags, int) else None,
+                        adc0, adc1
+                    ])
 
                     if not args.json and args.verbose:
-                        print(f"LOG {iso} T0={t0_C:.2f}C T1={t1_C:.2f}C", file=sys.stderr)
+                        print(f"LOG {iso} T0={fmt_temp(t0_C)}C T1={fmt_temp(t1_C)}C", file=sys.stderr)
 
                 else:
                     # Log a failed sample row (keep time continuity)

@@ -1,0 +1,76 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: uartctl ping (auto)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/uartctl.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--verbose",
+                "ping",
+                "--port", "auto"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "Python: uartctl scan",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/uartctl.py",
+            "console": "integratedTerminal",
+            "args": [
+                "scan",
+                "--all"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "Python: uartctl temp",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/uartctl.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--verbose",
+                "temp",
+                "--port", "auto"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "Python: uartctl logtemp",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/uartctl.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--verbose",
+                "logtemp",
+                "--port", "auto",
+                "--interval", "1.0",
+                "--out", "~/temps.csv"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "Python: uartctl logtemp (edit port if needed)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/uartctl.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--verbose",
+                "logtemp",
+                "--port", "/dev/ttyGATEWAY",
+                "--interval", "1.0",
+                "--out", "~/temps.csv"
+            ],
+            "justMyCode": true
+        }
+    ]
+}
