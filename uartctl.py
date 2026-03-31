@@ -11,6 +11,10 @@ Subcommands:
 - id: query device identification string ("ID?")
 - ver: query firmware version as MAJOR.MINOR.PATCH ("VER?")
 - uptime: query device uptime in milliseconds ("UPTIME?"), optionally formatted with --human
+- rping: RF ping the remote node via the gateway
+- temp: fetch remote temperatures via the gateway ("TEMP?")
+- logtemp: periodically query temperature data ("TEMP?") and write CSV logs
+  for later analysis/plotting
 
 Common options:
 - --port <path|auto>: serial port to use, or 'auto' to select the only available candidate
